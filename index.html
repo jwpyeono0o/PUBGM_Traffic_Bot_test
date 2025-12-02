@@ -152,6 +152,22 @@
           📅 <span id="dateRangeText"></span>
         </span>
       </div>
+      <!-- 월별 선택 필터 -->
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <label><strong>📅 월별 선택:</strong></label>
+        <select id="monthSelect" style="padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:#fff;border-radius:6px;min-width:140px">
+          <option value="">월 선택...</option>
+        </select>
+        <span style="color:var(--muted);font-size:12px">vs</span>
+        <select id="compareMonthSelect" style="padding:6px 10px;border:1px solid var(--border);background:var(--bg);color:#fff;border-radius:6px;min-width:140px">
+          <option value="">비교 월 (선택)</option>
+        </select>
+        <button id="btnApplyMonth" style="padding:6px 12px;background:linear-gradient(135deg,#5352ed,#3742fa);border:none;border-radius:6px;color:#fff;font-weight:600;cursor:pointer;font-size:12px">월별 적용</button>
+        <button id="btnClearMonth" style="padding:6px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:#fff;font-weight:600;cursor:pointer;font-size:12px">초기화</button>
+        <span id="monthIndicator" style="display:none;margin-left:8px;padding:6px 12px;background:rgba(83,82,237,0.15);border:1px solid rgba(83,82,237,0.3);border-radius:6px;font-size:12px;color:#5352ed">
+          📆 <span id="monthText"></span>
+        </span>
+      </div>
         </div>
         
         <div class="content">
@@ -552,6 +568,11 @@
       Papa.parse(f,{header:true,skipEmptyLines:true,
         complete:({data})=>{ 
           rawCsvRows = data; // 원본 데이터 저장
+          
+          // 월 목록 추출 및 드롭다운 업데이트
+          const months = extractMonthsFromCSV(data);
+          updateMonthSelects(months);
+          
           const p=processData(data); 
           if(p){ 
             currentData=p; 
@@ -704,6 +725,238 @@
         }
       }
     });
+
+    // ========== 월별 선택 기능 ==========
+    let availableMonths = []; // 사용 가능한 월 목록
+    
+    // CSV에서 월 목록 추출
+    function extractMonthsFromCSV(rows) {
+      const monthSet = new Set();
+      const firstRow = rows[0] || {};
+      const allKeys = Object.keys(firstRow);
+      
+      const findColumn = (keys, possibleNames) => {
+        const lowerKeys = keys.map(k => k.toLowerCase());
+        for(const name of possibleNames){
+          const lowerName = name.toLowerCase();
+          const idx = lowerKeys.indexOf(lowerName);
+          if(idx !== -1) return keys[idx];
+        }
+        return null;
+      };
+      
+      const dateCol = findColumn(allKeys, ['Date', 'date', '날짜']);
+      if(!dateCol) return [];
+      
+      const normalizeDate = (dateStr) => {
+        let normalized = dateStr.toString().trim();
+        normalized = normalized.replace(/\./g, '-').replace(/\s+/g, '');
+        normalized = normalized.replace(/-+/g, '-');
+        normalized = normalized.replace(/^-+|-+$/g, '');
+        return normalized;
+      };
+      
+      rows.forEach(r => {
+        if(r[dateCol]){
+          const dateStr = normalizeDate(r[dateCol]);
+          const parts = dateStr.split('-');
+          if(parts.length >= 2){
+            const year = parseInt(parts[0]);
+            const month = parseInt(parts[1]);
+            if(!isNaN(year) && !isNaN(month) && year > 2000){
+              monthSet.add(`${year}-${String(month).padStart(2, '0')}`);
+            }
+          }
+        }
+      });
+      
+      // 월 목록을 최신순으로 정렬
+      return Array.from(monthSet).sort().reverse();
+    }
+    
+    // 월 선택 드롭다운 업데이트
+    function updateMonthSelects(months) {
+      availableMonths = months;
+      const monthSelect = document.getElementById('monthSelect');
+      const compareMonthSelect = document.getElementById('compareMonthSelect');
+      
+      // 기존 옵션 제거 (첫번째 기본 옵션 제외)
+      while(monthSelect.options.length > 1) monthSelect.remove(1);
+      while(compareMonthSelect.options.length > 1) compareMonthSelect.remove(1);
+      
+      // 월 옵션 추가
+      months.forEach(month => {
+        const [year, mon] = month.split('-');
+        const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+        const displayText = `${year}년 ${monthNames[parseInt(mon) - 1]}`;
+        
+        const opt1 = new Option(displayText, month);
+        const opt2 = new Option(displayText, month);
+        monthSelect.add(opt1);
+        compareMonthSelect.add(opt2);
+      });
+    }
+    
+    // 월의 시작일과 종료일 반환
+    function getMonthDateRange(monthStr) {
+      const [year, month] = monthStr.split('-').map(Number);
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0); // 해당 월의 마지막 날
+      
+      const formatDate = (d) => {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      };
+      
+      return {
+        start: formatDate(startDate),
+        end: formatDate(endDate)
+      };
+    }
+    
+    // 월별 필터 적용
+    document.getElementById('btnApplyMonth').addEventListener('click', () => {
+      if(!rawCsvRows || rawCsvRows.length === 0){
+        alert('CSV 데이터를 먼저 로드해주세요.');
+        return;
+      }
+      
+      const selectedMonth = document.getElementById('monthSelect').value;
+      const compareMonth = document.getElementById('compareMonthSelect').value;
+      
+      if(!selectedMonth){
+        alert('월을 선택해주세요.');
+        return;
+      }
+      
+      const firstRow = rawCsvRows[0] || {};
+      const allKeys = Object.keys(firstRow);
+      const findColumn = (keys, possibleNames) => {
+        const lowerKeys = keys.map(k => k.toLowerCase());
+        for(const name of possibleNames){
+          const lowerName = name.toLowerCase();
+          const idx = lowerKeys.indexOf(lowerName);
+          if(idx !== -1) return keys[idx];
+        }
+        return null;
+      };
+      
+      const dateCol = findColumn(allKeys, ['Date', 'date', '날짜']);
+      if(!dateCol){
+        alert('Date 컬럼을 찾을 수 없습니다.');
+        return;
+      }
+      
+      const normalizeDate = (dateStr) => {
+        let normalized = dateStr.toString().trim();
+        normalized = normalized.replace(/\./g, '-').replace(/\s+/g, '');
+        normalized = normalized.replace(/-+/g, '-');
+        normalized = normalized.replace(/^-+|-+$/g, '');
+        return normalized;
+      };
+      
+      // 선택된 월의 데이터 필터링
+      const selectedRange = getMonthDateRange(selectedMonth);
+      const selectedStart = new Date(selectedRange.start);
+      const selectedEnd = new Date(selectedRange.end);
+      selectedEnd.setHours(23, 59, 59, 999);
+      
+      let filteredRows = rawCsvRows.filter(r => {
+        if(!r[dateCol]) return false;
+        const dateStr = normalizeDate(r[dateCol]);
+        const rowDate = new Date(dateStr);
+        if(isNaN(rowDate)) return false;
+        return rowDate >= selectedStart && rowDate <= selectedEnd;
+      });
+      
+      // 비교 월이 선택된 경우 해당 데이터도 포함
+      if(compareMonth && compareMonth !== selectedMonth){
+        const compareRange = getMonthDateRange(compareMonth);
+        const compareStart = new Date(compareRange.start);
+        const compareEnd = new Date(compareRange.end);
+        compareEnd.setHours(23, 59, 59, 999);
+        
+        const compareRows = rawCsvRows.filter(r => {
+          if(!r[dateCol]) return false;
+          const dateStr = normalizeDate(r[dateCol]);
+          const rowDate = new Date(dateStr);
+          if(isNaN(rowDate)) return false;
+          return rowDate >= compareStart && rowDate <= compareEnd;
+        });
+        
+        filteredRows = [...filteredRows, ...compareRows];
+      }
+      
+      if(filteredRows.length === 0){
+        alert('선택한 월에 해당하는 데이터가 없습니다.');
+        return;
+      }
+      
+      const p = processData(filteredRows);
+      if(p){
+        currentData = p;
+        
+        // 상태 텍스트 업데이트
+        const [year, mon] = selectedMonth.split('-');
+        const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+        let statusText = `${year}년 ${monthNames[parseInt(mon) - 1]}`;
+        
+        if(compareMonth && compareMonth !== selectedMonth){
+          const [cYear, cMon] = compareMonth.split('-');
+          statusText += ` vs ${cYear}년 ${monthNames[parseInt(cMon) - 1]}`;
+        }
+        
+        document.getElementById('status').textContent = `월별 데이터: ${statusText} (${filteredRows.length} rows)`;
+        
+        // 월별 표시 업데이트
+        const indicator = document.getElementById('monthIndicator');
+        const monthText = document.getElementById('monthText');
+        if(indicator && monthText){
+          monthText.textContent = statusText;
+          indicator.style.display = 'inline-block';
+        }
+        
+        // Date Range 표시는 숨김
+        document.getElementById('dateRangeIndicator').style.display = 'none';
+        
+        createTreemap(currentData);
+        
+        if(document.getElementById('tab-risers-fallers').classList.contains('active')){
+          updateRisersFallers(currentData);
+        }
+        if(document.getElementById('tab-country-detail').classList.contains('active')){
+          updateCountrySelect(currentData);
+        }
+        if(document.getElementById('tab-news').classList.contains('active')){
+          loadNewsFromCSV();
+        }
+      }
+    });
+    
+    // 월별 필터 초기화
+    document.getElementById('btnClearMonth').addEventListener('click', () => {
+      document.getElementById('monthSelect').value = '';
+      document.getElementById('compareMonthSelect').value = '';
+      
+      const indicator = document.getElementById('monthIndicator');
+      if(indicator) indicator.style.display = 'none';
+      
+      if(rawCsvRows && rawCsvRows.length > 0){
+        const p = processData(rawCsvRows);
+        if(p){
+          currentData = p;
+          document.getElementById('status').textContent = 'CSV Loaded (All data)';
+          createTreemap(currentData);
+          
+          if(document.getElementById('tab-risers-fallers').classList.contains('active')){
+            updateRisersFallers(currentData);
+          }
+          if(document.getElementById('tab-country-detail').classList.contains('active')){
+            updateCountrySelect(currentData);
+          }
+        }
+      }
+    });
+    // ========== 월별 선택 기능 끝 ==========
 
     function processData(rows){
       try{
